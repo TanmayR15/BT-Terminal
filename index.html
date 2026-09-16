@@ -467,6 +467,56 @@
     font-family: 'Press Start 2P', monospace; font-size: 11px; text-align: center; letter-spacing: 1px;
     color: var(--maths); margin-bottom: 10px;
   }
+
+  /* ---- pace / projection ---- */
+  .pace-box { background: var(--panel); border: 3px solid var(--panel-edge); padding: 16px; box-shadow: 5px 5px 0 var(--shadow); margin-bottom: 20px; }
+  .pace-title.pixel { font-size: 11px; display: block; margin-bottom: 14px; color: #F2F2F2; }
+  .pace-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 2px solid var(--panel-edge); }
+  .pace-row:last-child { border-bottom: none; }
+  .pace-key { font-size: 17px; color: var(--ink-muted); position: relative; top: -2px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pace-val { font-size: 18px; color: var(--ink); text-align: right; position: relative; top: -2px; flex-shrink: 0; }
+  .pace-val.good { color: var(--maths); }
+  .pace-val.warn { color: var(--physics); }
+  .pace-note { font-size: 15px; color: var(--ink-muted); margin-top: 12px; position: relative; top: -2px; }
+
+  /* ---- chapter notes ---- */
+  .notes-card { background: var(--panel); border: 3px solid var(--panel-edge); padding: 16px; box-shadow: 5px 5px 0 var(--shadow); margin-top: 16px; }
+  .notes-area {
+    width: 100%; min-height: 92px; resize: vertical; font-family: 'VT323', monospace; font-size: 19px;
+    padding: 10px; background: var(--bg); border: 3px solid var(--panel-edge); color: var(--ink); margin-top: 10px;
+  }
+  .notes-area:focus { outline: none; border-color: var(--ink-dim); }
+  .notes-saved { font-size: 14px; color: var(--maths); margin-top: 8px; min-height: 17px; letter-spacing: 0.5px; }
+  .note-flag { color: #F2C94C; margin-left: 8px; font-family: 'VT323', monospace; font-size: 17px; }
+
+  /* ---- command palette (F) ---- */
+  .cmdk-overlay {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.72); z-index: 9999;
+    display: flex; align-items: flex-start; justify-content: center; padding: 70px 16px 16px;
+  }
+  .cmdk-box {
+    width: 100%; max-width: 560px; background: var(--panel); border: 3px solid var(--ink);
+    box-shadow: 8px 8px 0 var(--shadow); display: flex; flex-direction: column; max-height: 74vh;
+  }
+  .cmdk-input {
+    font-family: 'VT323', monospace; font-size: 23px; padding: 13px 16px; background: var(--bg);
+    border: none; border-bottom: 3px solid var(--panel-edge); color: var(--ink); outline: none;
+  }
+  .cmdk-hint {
+    font-size: 14px; color: var(--ink-muted); padding: 7px 16px; letter-spacing: 0.5px;
+    border-bottom: 2px solid var(--panel-edge);
+  }
+  .cmdk-list { overflow-y: auto; }
+  .cmdk-item {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; font: inherit;
+    background: transparent; border: none; border-bottom: 2px solid var(--panel-edge);
+    padding: 10px 16px; color: var(--ink); cursor: pointer;
+  }
+  .cmdk-item.active { background: var(--panel-edge); }
+  .cmdk-dot { width: 10px; height: 10px; border: 2px solid var(--shadow); flex-shrink: 0; }
+  .cmdk-label { font-size: 19px; flex: 1; min-width: 0; position: relative; top: -2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cmdk-meta { font-size: 14px; color: var(--ink-muted); flex-shrink: 0; letter-spacing: 0.5px; }
+  .cmdk-empty { font-size: 18px; color: var(--ink-muted); padding: 18px 16px; }
 </style>
 </head>
 <body>
@@ -864,6 +914,34 @@ function togglePin(subject, moduleIndex, chapterIdx) {
   render();
 }
 
+/* ---------------- per-chapter notes ---------------- */
+const NOTES_KEY = "bt-ledger-notes-v1";
+function noteKeyFor(subject, moduleIndex, chapterIdx) { return `${subject}|${moduleIndex}|${chapterIdx}`; }
+function loadNotes() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(NOTES_KEY) || "{}");
+    return (parsed && typeof parsed === "object" && !Array.isArray(parsed)) ? parsed : {};
+  } catch (err) {
+    console.warn("Could not load chapter notes, starting fresh.", err);
+    return {};
+  }
+}
+function saveNotes() { safeLocalStorageSet(NOTES_KEY, JSON.stringify(state.notes)); }
+function getNote(subject, moduleIndex, chapterIdx) {
+  return state.notes[noteKeyFor(subject, moduleIndex, chapterIdx)] || "";
+}
+function hasNote(subject, moduleIndex, chapterIdx) {
+  return getNote(subject, moduleIndex, chapterIdx).trim().length > 0;
+}
+// Deliberately does NOT call render(): notes save while the textarea still has
+// focus, and a re-render would rebuild the node and throw away the caret.
+function setNote(subject, moduleIndex, chapterIdx, text) {
+  const k = noteKeyFor(subject, moduleIndex, chapterIdx);
+  if (text.trim()) state.notes[k] = text;
+  else delete state.notes[k];
+  saveNotes();
+}
+
 /* ---------------- timer mute + last-backup tracking ---------------- */
 const TIMER_MUTED_KEY = "bt-ledger-timer-muted-v1";
 function loadTimerMuted() {
@@ -939,6 +1017,7 @@ function exportProgress() {
     freezeDays: state.freezeDays,
     freezeDeclined: state.freezeDeclined,
     countdowns: state.countdowns,
+    notes: state.notes,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -974,6 +1053,7 @@ function importProgressFromFile(file) {
       const countdownsSource = isBundled && Array.isArray(parsed.countdowns)
         ? parsed.countdowns.filter((c) => c && typeof c.id === "string" && typeof c.label === "string" && typeof c.targetDate === "string")
         : [];
+      const notesSource = isBundled && parsed.notes && typeof parsed.notes === "object" && !Array.isArray(parsed.notes) ? parsed.notes : {};
 
       const merged = makeEmptyProgress();
       SUBJECTS.forEach((s) => {
@@ -1027,6 +1107,11 @@ function importProgressFromFile(file) {
 
       state.countdowns = countdownsSource;
       saveCountdowns();
+
+      const cleanNotes = {};
+      Object.entries(notesSource).forEach(([k, v]) => { if (typeof v === "string" && v.trim()) cleanNotes[k] = v; });
+      state.notes = cleanNotes;
+      saveNotes();
 
       render();
       alert(isBundled
@@ -1247,6 +1332,7 @@ const state = {
   timerMuted: loadTimerMuted(),
   lastExportAt: loadLastExportAt(),
   pomodoroStats: loadPomodoroStats(),
+  notes: loadNotes(),
   cdFormOpen: false,
   statsWeekOffset: 0,
   timer: {
@@ -1968,7 +2054,10 @@ function renderModule(subject, moduleIndex) {
     stack.appendChild(el("button", { class: "card", onclick: () => goChapter(subject, moduleIndex, c) }, [
       el("div", { class: "subject-strip", style: `background:${t.accent}` }),
       el("div", { class: "card-row" }, [
-        el("span", { class: "card-title-sm pixel", text: chConfig.name.toUpperCase() }),
+        el("span", { class: "card-title-sm pixel" }, [
+          document.createTextNode(chConfig.name.toUpperCase()),
+          hasNote(subject, moduleIndex, c) ? el("span", { class: "note-flag", title: "Has notes", text: "\u270E" }) : null,
+        ]),
         statLine(agg.done, agg.total),
       ]),
       pixelBar(agg.done, agg.total, t.accent),
@@ -2065,6 +2154,36 @@ function renderChapter(subject, moduleIndex, chapterIdx) {
       ]),
       el("div", { class: "ex-controls" }, [pyqMinus, pyqInput, pyqPlus]),
     ]),
+  ]));
+
+  // Scratchpad for this chapter: formulae you keep forgetting, question numbers
+  // to revisit, doubts to ask. Saved as you type (debounced), never re-rendered
+  // underneath you.
+  const savedFlag = el("div", { class: "notes-saved", text: "" });
+  const notesArea = el("textarea", {
+    class: "notes-area",
+    placeholder: "Formulae, tricky Q numbers, doubts to clear\u2026",
+  });
+  notesArea.value = getNote(subject, moduleIndex, chapterIdx);
+  let noteSaveTimer = null;
+  const commitNote = () => {
+    setNote(subject, moduleIndex, chapterIdx, notesArea.value);
+    savedFlag.textContent = "\u2713 SAVED";
+    clearTimeout(noteSaveTimer);
+    noteSaveTimer = setTimeout(() => { savedFlag.textContent = ""; }, 1600);
+  };
+  let noteTypeTimer = null;
+  notesArea.addEventListener("input", () => {
+    clearTimeout(noteTypeTimer);
+    noteTypeTimer = setTimeout(commitNote, 600);
+  });
+  notesArea.addEventListener("blur", commitNote);
+
+  wrap.appendChild(el("div", { class: "notes-card" }, [
+    el("span", { class: "ex-name pixel", text: "NOTES" }),
+    el("div", { class: "ex-sub", text: "private scratchpad for this chapter \u00b7 saves as you type" }),
+    notesArea,
+    savedFlag,
   ]));
 
   return wrap;
@@ -2304,6 +2423,44 @@ function renderDayDetail(key) {
   return detail;
 }
 
+/* ================= pace & projection =================
+   Derived from the same history log the stats page uses, so it needs no extra
+   storage: recent throughput -> questions/day, plus a couple of other
+   at-a-glance progress numbers. */
+function paceForLastDays(nDays) {
+  const keys = [];
+  for (let i = 0; i < nDays; i++) keys.push(dayKeyForOffset(i));
+  const s = statsForKeys(keys);
+  return { total: s.total, perDay: s.total / nDays, bySubject: s.bySubject };
+}
+function bestDayTotalForLastDays(nDays) {
+  let max = 0;
+  for (let i = 0; i < nDays; i++) max = Math.max(max, dayTotalFor(dayKeyForOffset(i)));
+  return max;
+}
+
+function renderPaceBox() {
+  const overall = overallAgg(state.progress);
+  const remaining = Math.max(0, overall.total - overall.done);
+  const p7 = paceForLastDays(7);
+  const p30 = paceForLastDays(30);
+
+  const box = el("div", { class: "pace-box" });
+  box.appendChild(el("span", { class: "pace-title pixel", text: "PACE \u0026 PROJECTION" }));
+
+  const row = (key, value, cls) => el("div", { class: "pace-row" }, [
+    el("span", { class: "pace-key", text: key }),
+    el("span", { class: `pace-val${cls ? " " + cls : ""}`, text: value }),
+  ]);
+
+  box.appendChild(row("Last 7 days", `${p7.total} q \u00b7 ${p7.perDay.toFixed(1)}/day`));
+  box.appendChild(row("Last 30 days", `${p30.total} q \u00b7 ${p30.perDay.toFixed(1)}/day`));
+  box.appendChild(row("Questions left", `${remaining} of ${overall.total}`));
+  box.appendChild(row("Best day (30d)", `${bestDayTotalForLastDays(30)} q`));
+
+  return box;
+}
+
 function renderStats() {
   const wrap = el("div");
   wrap.appendChild(crumbs(["Home", "Stats"], (i) => { if (i === 0) goHome(); }));
@@ -2427,6 +2584,8 @@ function renderStats() {
       pixelBar(shareOfTotal * 100, 100, t.accent, 20, 10),
     ]));
   });
+
+  wrap.appendChild(renderPaceBox());
 
   if (state.history.length === 0) {
     wrap.appendChild(el("div", { class: "stats-note", text: "Stats start tracking from now \u2014 log a few questions and this page fills in." }));
@@ -2714,6 +2873,138 @@ function tickDashboard() {
   });
 }
 setInterval(tickDashboard, 1000);
+
+/* ================= command palette (press F) =================
+   Lives outside #app and manages its own DOM, so the app's render() never
+   rebuilds it mid-keystroke and steals the caret. */
+let paletteEl = null;
+let paletteResults = [];
+let paletteIndex = 0;
+
+function paletteCommands() {
+  return [
+    { label: "Dashboard", meta: "GO", accent: "#F2F2F2", run: goLanding },
+    { label: "Subjects", meta: "GO", accent: "#F2F2F2", run: goHome },
+    { label: "Heatmap", meta: "GO", accent: "#F2F2F2", run: goHeatmap },
+    { label: "Calendar", meta: "GO", accent: "#F2F2F2", run: goCalendar },
+    { label: "Stats", meta: "GO", accent: "#F2F2F2", run: goStats },
+    { label: "Timer", meta: "GO", accent: "#F2F2F2", run: goTimer },
+    { label: "Export backup", meta: "ACTION", accent: "var(--chemistry)", run: exportProgress },
+    { label: "Toggle revision mode", meta: "ACTION", accent: "var(--chemistry)", run: toggleRevisionMode },
+  ];
+}
+function paletteChapters() {
+  const out = [];
+  SUBJECTS.forEach((s) => CURRICULUM[s].forEach((mod, mi) => mod.chapters.forEach((c, ci) => {
+    const m = mi + 1, cIdx = ci + 1;
+    const agg = chapterAgg(state.progress, s, m, cIdx);
+    out.push({
+      label: c.name,
+      meta: `${s.slice(0, 4).toUpperCase()} M${m} \u00b7 ${pct(agg.done, agg.total)}%`,
+      accent: THEME[s].accent,
+      searchText: `${c.name} ${s} m${m}`,
+      run: () => goChapter(s, m, cIdx),
+    });
+  })));
+  return out;
+}
+// Subsequence match: typing "quadeq" finds "Quadratic Equations". Consecutive
+// hits and a match at the very start score higher, so exact prefixes float up.
+function fuzzyScore(query, text) {
+  const q = query.toLowerCase().replace(/\s+/g, "");
+  const t = text.toLowerCase();
+  if (!q) return 0;
+  let qi = 0, score = 0, streak = 0;
+  for (let i = 0; i < t.length && qi < q.length; i++) {
+    if (t[i] === q[qi]) {
+      qi += 1; streak += 1;
+      score += 2 + streak + (i === 0 ? 8 : 0);
+    } else streak = 0;
+  }
+  return qi === q.length ? score : -1;
+}
+function computePaletteResults(query) {
+  const pool = [...paletteChapters(), ...paletteCommands()];
+  if (!query.trim()) return paletteCommands();
+  return pool
+    .map((item) => ({ item, score: fuzzyScore(query, item.searchText || item.label) }))
+    .filter((r) => r.score >= 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 12)
+    .map((r) => r.item);
+}
+function openPalette() {
+  if (paletteEl) return;
+  paletteIndex = 0;
+
+  const input = el("input", { class: "cmdk-input", type: "text", placeholder: "Search chapters, jump anywhere\u2026" });
+  const list = el("div", { class: "cmdk-list" });
+  const box = el("div", { class: "cmdk-box" }, [
+    input,
+    el("div", { class: "cmdk-hint", text: "\u2191\u2193 MOVE \u00b7 ENTER OPEN \u00b7 ESC CLOSE" }),
+    list,
+  ]);
+  box.addEventListener("click", (e) => e.stopPropagation());
+
+  const overlay = el("div", { class: "cmdk-overlay", onclick: closePalette }, [box]);
+
+  const paint = () => {
+    list.innerHTML = "";
+    if (paletteResults.length === 0) {
+      list.appendChild(el("div", { class: "cmdk-empty", text: "No matches." }));
+      return;
+    }
+    paletteResults.forEach((item, i) => {
+      list.appendChild(el("button", {
+        class: i === paletteIndex ? "cmdk-item active" : "cmdk-item",
+        onclick: () => { closePalette(); item.run(); },
+      }, [
+        el("span", { class: "cmdk-dot", style: `background:${item.accent}` }),
+        el("span", { class: "cmdk-label", text: item.label }),
+        el("span", { class: "cmdk-meta", text: item.meta }),
+      ]));
+    });
+    const active = list.children[paletteIndex];
+    if (active && active.scrollIntoView) active.scrollIntoView({ block: "nearest" });
+  };
+
+  const refresh = () => { paletteResults = computePaletteResults(input.value); paletteIndex = 0; paint(); };
+
+  input.addEventListener("input", refresh);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); paletteIndex = Math.min(paletteResults.length - 1, paletteIndex + 1); paint(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); paletteIndex = Math.max(0, paletteIndex - 1); paint(); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      const chosen = paletteResults[paletteIndex];
+      if (chosen) { closePalette(); chosen.run(); }
+    } else if (e.key === "Escape") { e.preventDefault(); closePalette(); }
+  });
+
+  document.body.appendChild(overlay);
+  paletteEl = overlay;
+  refresh();
+  input.focus();
+}
+function closePalette() {
+  if (!paletteEl) return;
+  paletteEl.remove();
+  paletteEl = null;
+  paletteResults = [];
+}
+
+/* ---------------- F opens the palette (only when not typing) ---------------- */
+function isTypingTarget(node) {
+  if (!node) return false;
+  const tag = node.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || node.isContentEditable;
+}
+document.addEventListener("keydown", (e) => {
+  if (paletteEl) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (isTypingTarget(e.target)) return;
+  if (e.key.toLowerCase() === "f") { e.preventDefault(); openPalette(); }
+});
 
 render();
 </script>
