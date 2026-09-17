@@ -899,6 +899,14 @@ function overallAgg(progress) {
 }
 function pct(done, total) { return total === 0 ? 0 : Math.round((done / total) * 100); }
 function pctFloor(done, total) { return total === 0 ? 0 : Math.floor((done / total) * 100); }
+function questionsToNextPercent(done, total) {
+  if (total === 0) return { needed: 0, nextPct: 0 };
+  const curPct = pctFloor(done, total);
+  if (curPct >= 100) return { needed: 0, nextPct: 100 };
+  const nextPct = curPct + 1;
+  const needed = Math.max(0, Math.ceil((nextPct / 100) * total) - done);
+  return { needed, nextPct };
+}
 
 /* ---------------- persistence ---------------- */
 const STORAGE_KEY = "bt-module-log-progress-v1";
@@ -2622,9 +2630,9 @@ function bestDayTotalForLastDays(nDays) {
 
 function renderPaceBox() {
   const overall = overallAgg(state.progress);
-  const remaining = Math.max(0, overall.total - overall.done);
   const p7 = paceForLastDays(7);
   const p30 = paceForLastDays(30);
+  const nextPct = questionsToNextPercent(overall.done, overall.total);
 
   const box = el("div", { class: "pace-box" });
   box.appendChild(el("span", { class: "pace-title pixel", text: "PACE \u0026 PROJECTION" }));
@@ -2636,7 +2644,7 @@ function renderPaceBox() {
 
   box.appendChild(row("Last 7 days", `${p7.total} q \u00b7 ${p7.perDay.toFixed(1)}/day`));
   box.appendChild(row("Last 30 days", `${p30.total} q \u00b7 ${p30.perDay.toFixed(1)}/day`));
-  box.appendChild(row("Questions left", `${remaining} of ${overall.total}`));
+  box.appendChild(row("Qs to next %", `${nextPct.needed}q to ${nextPct.nextPct}%`));
   box.appendChild(row("Best day (30d)", `${bestDayTotalForLastDays(30)} q`));
 
   return box;
