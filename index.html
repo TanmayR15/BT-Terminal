@@ -91,6 +91,14 @@
   .subject-title.pixel { font-size: 15px; }
 
   .chapter-total-box { background: var(--panel); border: 3px solid var(--panel-edge); padding: 18px; margin-bottom: 18px; box-shadow: 5px 5px 0 var(--shadow); }
+  .exam-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; margin-bottom: 12px; font-size: 16px; color: var(--ink-dim); }
+  .exam-sep { color: var(--panel-edge); }
+  .exam-tag { font-size: 8px; padding: 4px 6px; border: 2px solid currentColor; letter-spacing: 0.5px; }
+  .exam-tag.reduced { color: #E8A63C; }
+  .exam-tag.removed { color: #FF5A5A; }
+  .exam-arrow.up { color: var(--maths); }
+  .exam-arrow.down { color: var(--physics); }
+  .exam-note { color: var(--chemistry); cursor: help; }
 
   .ex-card { background: var(--panel); border: 3px solid var(--panel-edge); padding: 16px; box-shadow: 5px 5px 0 var(--shadow); }
   .pyq-card {
@@ -715,6 +723,109 @@ const CURRICULUM = {
 };
 const SUBJECTS = Object.keys(CURRICULUM);
 /* ============================================================ */
+
+// Exam-appearance data (JEE Main 2026 vs 2025 question counts per chapter),
+// keyed by subject -> exact CURRICULUM chapter name. tag is "reduced",
+// "removed", or null. Chapters not in here simply show no exam row.
+// Some source chapters had no unambiguous match in CURRICULUM and were left
+// out on purpose -- see chat for the list.
+const EXAM_DATA = {
+  Maths: {
+    "Basic Mathematic": { y2026: 3, y2025: 1, tag: null },
+    "Trigonometric Ratios and Identities": { y2026: 12, y2025: 4, tag: null },
+    "Trignometric Equations": { y2026: 5, y2025: 8, tag: "removed" },
+    "Solution of Triangles": { y2026: 0, y2025: 0, tag: "removed" },
+    "Sequence and Series": { y2026: 33, y2025: 30, tag: "reduced" },
+    "Straight Lines": { y2026: 15, y2025: 20, tag: "reduced" },
+    "Sets and Relations": { y2026: 13, y2025: 18, tag: null },
+    "Quadratic Equations": { y2026: 19, y2025: 14, tag: null },
+    "Complex Numbers": { y2026: 17, y2025: 19, tag: "reduced" },
+    "Permutations and Combinations": { y2026: 21, y2025: 20, tag: null },
+    "Binomial Theorem": { y2026: 18, y2025: 23, tag: "reduced" },
+    "Circles": { y2026: 17, y2025: 9, tag: "reduced" },
+    "Parabola": { y2026: 15, y2025: 17, tag: "reduced" },
+    "Ellipse": { y2026: 14, y2025: 18, tag: "reduced" },
+    "Hyperbola": { y2026: 10, y2025: 12, tag: "reduced" },
+    "Indefinite Integration": { y2026: 6, y2025: 8, tag: null },
+    "Definite Integration": { y2026: 30, y2025: 22, tag: "reduced" },
+    "Area under Curve": { y2026: 16, y2025: 19, tag: null },
+    "Differential Equations": { y2026: 20, y2025: 22, tag: "reduced" },
+    "Probability": { y2026: 17, y2025: 23, tag: "reduced" },
+    "Statistics": { y2026: 16, y2025: 8, tag: null },
+    "Functions": { y2026: 22, y2025: 25, tag: null },
+    "Inverse Trigonometric Functions": { y2026: 12, y2025: 9, tag: null },
+    "Limits, Continuity and Differentiability": { y2026: 22, y2025: 22, tag: null },
+    "Methods of Differentiation": { y2026: 3, y2025: 1, tag: null },
+    "Application of Differentiation": { y2026: 10, y2025: 12, tag: "reduced" },
+    "Determinants": { y2026: 11, y2025: 13, tag: "reduced" },
+    "Matrices": { y2026: 22, y2025: 21, tag: null },
+    "Vectors": { y2026: 24, y2025: 21, tag: "reduced" },
+    "3 Dimensional Geometry": { y2026: 32, y2025: 36, tag: "reduced" },
+  },
+  Physics: {
+    "Mathematics for Physics": { y2026: 3, y2025: 7, tag: null },
+    "Units, Dimensions and Error Analysis": { y2026: 15, y2025: 25, tag: null },
+    "Kinematics": { y2026: 19, y2025: 20, tag: null },
+    "Newton's Laws of Motion": { y2026: 17, y2025: 8, tag: null },
+    "Work, Power, Energy": { y2026: 13, y2025: 18, tag: null },
+    "Center of Mass & Conservation of Linear Momentum": { y2026: 7, y2025: 8, tag: null },
+    "Rotational Dynamics": { y2026: 26, y2025: 29, tag: null },
+    "Gravitation": { y2026: 10, y2025: 12, tag: null },
+    "Fluids": { y2026: 21, y2025: 22, tag: null },
+    "Simple Harmonic Motion": { y2026: 15, y2025: 11, tag: null },
+    "Wave Motion": { y2026: 10, y2025: 11, tag: "reduced" },
+    "Mechanical Properties of Matter": { y2026: 14, y2025: 9, tag: null },
+    "Thermal Expansion and Calorimetry": { y2026: 8, y2025: 11, tag: "reduced", note: "Split from Thermal Properties of Matter. So this data is of both Thermal Exapansion and Calorimetry and Heat Transfer " },
+    "Heat Transfer": { y2026: 8, y2025: 11, tag: "reduced", note: "Split from Thermal Properties of Matter. So this data is of both Thermal Exapansion and Calorimetry and Heat Transfer" },
+    "Kinetic Theory of Gases": { y2026: 11, y2025: 7, tag: null },
+    "Thermodynamics": { y2026: 21, y2025: 27, tag: "reduced" },
+    "Electrostatics": { y2026: 27, y2025: 36, tag: null },
+    "Current Electricity": { y2026: 32, y2025: 20, tag: "reduced" },
+    "Capacitance": { y2026: 14, y2025: 16, tag: null },
+    "Magnetic Field": { y2026: 18, y2025: 23, tag: null },
+    "Magnetism and Matter": { y2026: 3, y2025: 5, tag: "reduced" },
+    "Electromagnetic Induction": { y2026: 19, y2025: 8, tag: null },
+    "Alternating Current": { y2026: 10, y2025: 10, tag: "reduced" },
+    "Electromagnetic Waves": { y2026: 17, y2025: 10, tag: null },
+    "Geometrical Optics": { y2026: 35, y2025: 43, tag: "reduced" },
+    "Wave Optics": { y2026: 23, y2025: 19, tag: null },
+    "Modern Physics": { y2026: 41, y2025: 38, tag: "reduced" },
+    "Semiconductor Devices": { y2026: 19, y2025: 18, tag: "reduced" },
+  },
+  Chemistry: {
+    "Mole Concept": { y2026: 14, y2025: 25, tag: null },
+    "Atomic Structure": { y2026: 27, y2025: 23, tag: null },
+    "Periodic Properties": { y2026: 22, y2025: 22, tag: null },
+    "Chemical Bonding": { y2026: 23, y2025: 22, tag: null },
+    "Thermodynamics": { y2026: 22, y2025: 32, tag: null },
+    "Chemical Equilibrium": { y2026: 15, y2025: 10, tag: null },
+    "Ionic Equilibrium": { y2026: 14, y2025: 15, tag: null },
+    "Redox Reactions": { y2026: 8, y2025: 6, tag: null },
+    "Hydrogen and Its Compounds": { y2026: 1, y2025: 0, tag: "removed" },
+    "S-Block Elements": { y2026: 2, y2025: 0, tag: "removed" },
+    "P-Block (Part-I)": { y2026: 7, y2025: 4, tag: "reduced" },
+    "General Organic Chemistry": { y2026: 38, y2025: 43, tag: null },
+    "Hydrocarbons": { y2026: 28, y2025: 24, tag: null },
+    "Environmental Chemistry": { y2026: 0, y2025: 0, tag: "removed" },
+    "Solid State": { y2026: 0, y2025: 0, tag: "removed" },
+    "Solutions & Colligative Properties": { y2026: 25, y2025: 23, tag: null },
+    "Electrochemistry": { y2026: 21, y2025: 24, tag: null },
+    "Chemical Kinetics": { y2026: 25, y2025: 25, tag: null },
+    "Surface Chemistry": { y2026: 0, y2025: 0, tag: "removed" },
+    "Metallurgy": { y2026: 0, y2025: 0, tag: "removed" },
+    "P-Block (Part-II)": { y2026: 8, y2025: 9, tag: "reduced" },
+    "Chemistry of d & f-block": { y2026: 24, y2025: 25, tag: null },
+    "Coordination Compounds": { y2026: 33, y2025: 40, tag: null },
+    "Alkyl and Aryl Halides": { y2026: 19, y2025: 15, tag: null },
+    "Alcohols, Ethers and Phenols": { y2026: 22, y2025: 14, tag: null },
+    "Aldehydes and Ketones": { y2026: 14, y2025: 17, tag: null },
+    "Carboxylic Acid & its Derivatives": { y2026: 3, y2025: 8, tag: null },
+    "Nitrogen Containing Compounds": { y2026: 29, y2025: 19, tag: null },
+    "Biomolecules and Polymers": { y2026: 24, y2025: 22, tag: null },
+    "Principles of Practical Chemistry & Chemistry in Everyday Life": { y2026: 7, y2025: 6, tag: null },
+    "Gaseous State": { y2026: 0, y2025: 2, tag: "removed" },
+  },
+};
 
 const EXERCISE_META = [
   { key: "ex1", label: "Ex-1" },
@@ -1973,6 +2084,30 @@ function statLine(done, total) {
   return el("span", { class: "stat", text: `${done}/${total} \u00b7 ${pct(done, total)}%` });
 }
 
+// Renders the "REDUCED/REMOVED tag \u00b7 2026: X Qs \u2191 \u00b7 2025: Y Qs" row for a
+// chapter, if exam data exists for it. Returns null (skipped by el()) otherwise.
+function examRow(subject, chapterName) {
+  const d = EXAM_DATA[subject] && EXAM_DATA[subject][chapterName];
+  if (!d) return null;
+  const arrow = d.y2026 === d.y2025 ? null : d.y2026 > d.y2025 ? "up" : "down";
+  const bits = [];
+  if (d.tag) bits.push(el("span", { class: `exam-tag ${d.tag} pixel`, text: d.tag.toUpperCase() }));
+  bits.push(el("span", {}, [
+    document.createTextNode(`2026: ${d.y2026} Qs`),
+    arrow ? el("span", { class: `exam-arrow ${arrow}`, text: arrow === "up" ? " \u2191" : " \u2193" }) : null,
+  ]));
+  bits.push(el("span", {}, [
+    document.createTextNode(`2025: ${d.y2025} Qs`),
+    d.note ? el("span", { class: "exam-note", title: d.note, text: " *" }) : null,
+  ]));
+  const row = el("div", { class: "exam-row mono" });
+  bits.forEach((b, i) => {
+    if (i > 0) row.appendChild(el("span", { class: "exam-sep", text: "\u00b7" }));
+    row.appendChild(b);
+  });
+  return row;
+}
+
 function crumbs(items, onJump) {
   const wrap = el("div", { class: "crumbs" });
   items.forEach((label, i) => {
@@ -2136,6 +2271,7 @@ function renderChapter(subject, moduleIndex, chapterIdx) {
       el("span", { class: "card-title-sm pixel", text: `${chConfig.name.toUpperCase()} TOTAL` }),
       statLine(agg.done, agg.total),
     ]),
+    examRow(subject, chConfig.name),
     pixelBar(agg.done, agg.total, t.accent),
   ]));
 
