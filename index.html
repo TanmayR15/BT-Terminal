@@ -570,6 +570,38 @@
   .snake-bottom { display: flex; align-items: center; justify-content: space-between; width: 100%; }
   .snake-score.pixel { font-size: 11px; color: var(--maths); }
   .snake-hint { font-size: 14px; color: var(--ink-muted); }
+
+  /* ---- cloud account: top-right status + account button, login/account modal ---- */
+  .cloud-corner {
+    position: fixed; top: 10px; right: 10px; z-index: 9999;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .cloud-status {
+    cursor: pointer; font-size: 14px; padding: 4px 10px;
+    border: 2px solid var(--panel-edge); background: var(--panel); color: var(--ink-muted);
+  }
+  .cloud-status.syncing { color: var(--chemistry); border-color: var(--chemistry); }
+  .cloud-status.synced  { color: var(--maths); border-color: var(--maths); }
+  .cloud-status.error   { color: var(--physics); border-color: var(--physics); }
+  .cloud-acct-btn {
+    font-family: 'Press Start 2P', monospace; font-size: 9px; padding: 8px 10px;
+    border: 3px solid var(--ink); background: var(--panel); color: var(--ink);
+    cursor: pointer; box-shadow: 3px 3px 0 var(--shadow); flex-shrink: 0;
+  }
+  .cloud-acct-btn:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--shadow); }
+  .acct-box { width: 100%; max-width: 380px; }
+  .acct-sub { font-size: 15px; color: var(--ink-muted); text-align: center; }
+  .acct-row { display: flex; gap: 8px; width: 100%; }
+  .acct-input {
+    flex: 1; min-width: 0; font-family: 'VT323', monospace; font-size: 18px; padding: 8px;
+    border: 3px solid var(--panel-edge); background: var(--bg); color: var(--ink);
+  }
+  .acct-or { font-size: 14px; color: var(--panel-edge); }
+  .acct-passphrase {
+    font-size: 13px; color: var(--maths); text-align: center; padding: 12px;
+    border: 2px dashed var(--panel-edge); word-break: break-all; width: 100%;
+  }
+  .acct-msg { font-size: 14px; color: var(--physics); text-align: center; display: none; }
 </style>
 </head>
 <body>
@@ -908,6 +940,274 @@ function questionsToNextPercent(done, total) {
   return { needed, nextPct };
 }
 
+/* ---------------- cloud sync (passphrase account) ----------------
+   Everything funnels into buildBackupPayload() — the same shape used by
+   EXPORT — so the cloud copy is always exactly what a manual export would
+   contain. Pushes are debounced so a flurry of clicks becomes one request. */
+const WORKER_URL = "https://bt-terminal-api.tanmayrastogi15.workers.dev";
+const CLOUD_PASSPHRASE_KEY = "bt-cloud-passphrase-v1";
+const CLOUD_DECLINED_KEY = "bt-cloud-declined-v1";
+
+function getStoredPassphrase() {
+  try { return localStorage.getItem(CLOUD_PASSPHRASE_KEY); } catch (err) { return null; }
+}
+function storePassphrase(pass) { safeLocalStorageSet(CLOUD_PASSPHRASE_KEY, pass); }
+function clearStoredPassphrase() {
+  try { localStorage.removeItem(CLOUD_PASSPHRASE_KEY); } catch (err) { /* ignore */ }
+}
+
+// Set true while we're applying data that just came FROM the cloud/a file,
+// so the save*() calls that ripple out from that don't immediately push the
+// same data straight back up.
+let suppressCloudSync = false;
+let cloudSyncTimer = null;
+
+function scheduleCloudSync() {
+  if (suppressCloudSync) return;
+  const passphrase = getStoredPassphrase();
+  if (!passphrase) return;
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer = setTimeout(() => { cloudSyncTimer = null; pushToCloud(passphrase); }, 1500);
+}
+
+async function pushToCloud(passphrase) {
+  setCloudStatus("syncing");
+  try {
+    const res = await fetch(`${WORKER_URL}/api/sync/push`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passphrase, data: buildBackupPayload() }),
+    });
+    if (!res.ok) throw new Error(`push failed: ${res.status}`);
+    setCloudStatus("synced");
+  } catch (err) {
+    console.warn("Cloud sync failed", err);
+    setCloudStatus("error");
+  }
+}
+
+// Best-effort flush on tab close: if a debounced push is still pending,
+// fire it via sendBeacon so it has a chance to land even as the page unloads.
+window.addEventListener("beforeunload", () => {
+  const passphrase = getStoredPassphrase();
+  if (!passphrase || cloudSyncTimer === null) return;
+  clearTimeout(cloudSyncTimer);
+  const body = JSON.stringify({ passphrase, data: buildBackupPayload() });
+  navigator.sendBeacon(`${WORKER_URL}/api/sync/push`, new Blob([body], { type: "application/json" }));
+});
+
+/* ---- fixed top-right cluster: status badge (left) + ACCOUNT button (right),
+   updated directly rather than through the normal render() cycle ---- */
+let cloudStatusEl = null;
+function ensureCloudStatusEl() {
+  if (cloudStatusEl) return cloudStatusEl;
+  cloudStatusEl = el("div", { class: "cloud-status mono", onclick: () => openAccountModal() });
+  const acctBtn = el("button", { class: "cloud-acct-btn", text: "ACCOUNT", onclick: () => openAccountModal() });
+  const corner = el("div", { class: "cloud-corner" }, [cloudStatusEl, acctBtn]);
+  document.body.appendChild(corner);
+  return cloudStatusEl;
+}
+function setCloudStatus(status) {
+  const node = ensureCloudStatusEl();
+  const labels = { offline: "LOCAL ONLY", syncing: "SYNCING\u2026", synced: "SYNCED \u2713", error: "SYNC ERROR \u26A0" };
+  node.className = `cloud-status mono ${status}`;
+  node.textContent = labels[status] || status.toUpperCase();
+}
+
+/* ---- login gate (shown once, first visit) ---- */
+// Small helper: acct-msg divs stay hidden (no reserved space) until there's
+// actually something to say, so idle screens don't have a dead gap in them.
+function setMsg(msgEl, text) {
+  msgEl.textContent = text;
+  msgEl.style.display = text ? "block" : "none";
+}
+
+function showLoginGate() {
+  if (document.getElementById("login-gate")) return;
+
+  const msg = el("div", { class: "acct-msg mono" });
+  const passInput = el("input", { class: "acct-input mono", type: "text", placeholder: "your-passphrase-here" });
+
+  const loginBtn = el("button", { class: "toolbtn", text: "LOG IN" });
+  loginBtn.addEventListener("click", async () => {
+    const val = passInput.value.trim();
+    if (!val) { setMsg(msg, "Enter a passphrase first."); return; }
+    loginBtn.disabled = true;
+    setMsg(msg, "Checking\u2026");
+    try {
+      const res = await fetch(`${WORKER_URL}/api/sync/pull`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passphrase: val }),
+      });
+      if (res.status === 404) { setMsg(msg, "That passphrase wasn't found."); loginBtn.disabled = false; return; }
+      if (!res.ok) throw new Error(`pull failed: ${res.status}`);
+      const { data } = await res.json();
+      storePassphrase(val);
+      if (data && Object.keys(data).length > 0) applyBackupPayload(data);
+      setCloudStatus("synced");
+      closeLoginGate();
+      render();
+    } catch (err) {
+      console.warn("Login failed", err);
+      setMsg(msg, "Couldn't reach the server. Check your connection.");
+      loginBtn.disabled = false;
+    }
+  });
+
+  const createBtn = el("button", { class: "toolbtn", text: "CREATE NEW ACCOUNT" });
+  createBtn.addEventListener("click", () => showCreateAccountChoice());
+
+  const skipBtn = el("button", { class: "toolbtn", text: "SKIP (LOCAL ONLY)" });
+  skipBtn.addEventListener("click", () => {
+    safeLocalStorageSet(CLOUD_DECLINED_KEY, "1");
+    setCloudStatus("offline");
+    closeLoginGate();
+  });
+
+  const box = el("div", { class: "snake-box acct-box" }, [
+    el("div", { class: "snake-title pixel", text: "\u2601 SAVE YOUR PROGRESS" }),
+    el("div", { class: "acct-sub mono", text: "Sync your progress across devices with a passphrase." }),
+    el("div", { class: "acct-row" }, [passInput, loginBtn]),
+    el("div", { class: "acct-or mono", text: "\u2014 or \u2014" }),
+    createBtn,
+    msg,
+    skipBtn,
+  ]);
+  box.addEventListener("click", (e) => e.stopPropagation());
+  const overlay = el("div", { class: "game-overlay", id: "login-gate", onclick: () => { skipBtn.click(); } }, [box]);
+  document.body.appendChild(overlay);
+}
+
+// Second step, shown after clicking CREATE NEW ACCOUNT: generated vs custom.
+function showCreateAccountChoice() {
+  closeLoginGate();
+  const msg = el("div", { class: "acct-msg mono" });
+
+  const genBtn = el("button", { class: "toolbtn", text: "GENERATE FOR ME" });
+  genBtn.addEventListener("click", async () => {
+    genBtn.disabled = true;
+    setMsg(msg, "Creating\u2026");
+    await createAccount(null, msg, () => { genBtn.disabled = false; });
+  });
+
+  const customInput = el("input", { class: "acct-input mono", type: "text", placeholder: "your-own-passphrase" });
+  const useCustomBtn = el("button", { class: "toolbtn", text: "USE THIS" });
+  useCustomBtn.addEventListener("click", async () => {
+    const custom = customInput.value.trim();
+    if (!custom) { setMsg(msg, "Type a passphrase first, or use GENERATE FOR ME above."); return; }
+    if (custom.length < 8) { setMsg(msg, "Needs to be at least 8 characters."); return; }
+    useCustomBtn.disabled = true;
+    setMsg(msg, "Creating\u2026");
+    await createAccount(custom, msg, () => { useCustomBtn.disabled = false; });
+  });
+
+  const backBtn = el("button", { class: "toolbtn", text: "\u2190 BACK" });
+  backBtn.addEventListener("click", () => { closeLoginGate(); showLoginGate(); });
+
+  const box = el("div", { class: "snake-box acct-box" }, [
+    el("div", { class: "snake-title pixel", text: "\u2601 CREATE ACCOUNT" }),
+    genBtn,
+    el("div", { class: "acct-or mono", text: "\u2014 or pick your own \u2014" }),
+    el("div", { class: "acct-row" }, [customInput, useCustomBtn]),
+    msg,
+    backBtn,
+  ]);
+  box.addEventListener("click", (e) => e.stopPropagation());
+  const overlay = el("div", { class: "game-overlay", id: "login-gate" }, [box]);
+  document.body.appendChild(overlay);
+}
+
+async function createAccount(customPassphrase, msg, onFail) {
+  try {
+    const res = await fetch(`${WORKER_URL}/api/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(customPassphrase ? { passphrase: customPassphrase } : {}),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setMsg(msg, body.error || `Couldn't create an account (${res.status}).`);
+      onFail();
+      return;
+    }
+    showNewPassphrase(body.passphrase);
+  } catch (err) {
+    console.warn("Registration failed", err);
+    setMsg(msg, "Couldn't reach the server. Check your connection.");
+    onFail();
+  }
+}
+
+// Shown once right after CREATE NEW ACCOUNT — forces an explicit
+// acknowledgment before continuing, since the passphrase can't be recovered.
+function showNewPassphrase(passphrase) {
+  closeLoginGate();
+  const copyBtn = el("button", { class: "toolbtn", text: "COPY" });
+  copyBtn.addEventListener("click", () => {
+    navigator.clipboard?.writeText(passphrase).then(() => {
+      copyBtn.textContent = "COPIED!";
+      setTimeout(() => { copyBtn.textContent = "COPY"; }, 1500);
+    });
+  });
+  const confirmBtn = el("button", { class: "toolbtn", text: "I'VE SAVED IT \u2014 CONTINUE" });
+  confirmBtn.addEventListener("click", () => {
+    storePassphrase(passphrase);
+    closeLoginGate();
+    setCloudStatus("synced");
+    scheduleCloudSync(); // push whatever's currently local up, to seed the new account
+    // scheduleCloudSync() is debounced 1.5s — force it through immediately instead:
+    clearTimeout(cloudSyncTimer);
+    cloudSyncTimer = null;
+    pushToCloud(passphrase);
+    render();
+  });
+  const box = el("div", { class: "snake-box acct-box" }, [
+    el("div", { class: "snake-title pixel", text: "\u26A0 SAVE THIS PASSPHRASE" }),
+    el("div", { class: "acct-sub mono", text: "This is the only way to get your progress back on another device. It cannot be recovered if lost." }),
+    el("div", { class: "acct-passphrase pixel", text: passphrase }),
+    copyBtn,
+    confirmBtn,
+  ]);
+  box.addEventListener("click", (e) => e.stopPropagation());
+  const overlay = el("div", { class: "game-overlay", id: "login-gate" }, [box]); // no click-outside-to-close here on purpose
+  document.body.appendChild(overlay);
+}
+
+function closeLoginGate() {
+  const o = document.getElementById("login-gate");
+  if (o) o.remove();
+}
+
+// Opened by clicking the status badge once logged in: shows the passphrase
+// again (for adding a second device) and lets you sign this device out.
+function openAccountModal() {
+  if (document.getElementById("login-gate")) return;
+  const passphrase = getStoredPassphrase();
+  if (!passphrase) { showLoginGate(); return; }
+
+  const signOutBtn = el("button", { class: "toolbtn", text: "SIGN OUT ON THIS DEVICE" });
+  signOutBtn.addEventListener("click", () => {
+    if (!confirm("This only forgets the passphrase on this device \u2014 your cloud data stays safe. Continue?")) return;
+    clearStoredPassphrase();
+    setCloudStatus("offline");
+    closeLoginGate();
+  });
+  const closeBtn = el("button", { class: "toolbtn", text: "CLOSE" });
+  closeBtn.addEventListener("click", closeLoginGate);
+
+  const box = el("div", { class: "snake-box acct-box" }, [
+    el("div", { class: "snake-title pixel", text: "\u2601 ACCOUNT" }),
+    el("div", { class: "acct-sub mono", text: "Your passphrase (enter this on another device to sync):" }),
+    el("div", { class: "acct-passphrase pixel", text: passphrase }),
+    signOutBtn,
+    closeBtn,
+  ]);
+  box.addEventListener("click", (e) => e.stopPropagation());
+  const overlay = el("div", { class: "game-overlay", id: "login-gate", onclick: closeLoginGate }, [box]);
+  document.body.appendChild(overlay);
+}
+
 /* ---------------- persistence ---------------- */
 const STORAGE_KEY = "bt-module-log-progress-v1";
 
@@ -958,6 +1258,7 @@ function loadProgress() {
 
 function saveProgress() {
   safeLocalStorageSet(STORAGE_KEY, JSON.stringify(state.progress));
+  scheduleCloudSync();
 }
 
 /* ---------------- PYQ counters (separate from ex1-2; never counted in
@@ -1000,6 +1301,7 @@ function loadPyq() {
 }
 function savePyq() {
   safeLocalStorageSet(PYQ_KEY, JSON.stringify(state.pyq));
+  scheduleCloudSync();
 }
 function setPyq(subject, moduleIndex, chapterIdx, value) {
   const clamped = Math.max(0, isNaN(value) ? 0 : Math.round(value));
@@ -1025,6 +1327,7 @@ function loadCountdowns() {
 }
 function saveCountdowns() {
   safeLocalStorageSet(COUNTDOWNS_KEY, JSON.stringify(state.countdowns));
+  scheduleCloudSync();
 }
 function addCountdown(label, targetDate) {
   const cleanLabel = (label || "").trim();
@@ -1090,7 +1393,7 @@ function loadNotes() {
     return {};
   }
 }
-function saveNotes() { safeLocalStorageSet(NOTES_KEY, JSON.stringify(state.notes)); }
+function saveNotes() { safeLocalStorageSet(NOTES_KEY, JSON.stringify(state.notes)); scheduleCloudSync(); }
 function getNote(subject, moduleIndex, chapterIdx) {
   return state.notes[noteKeyFor(subject, moduleIndex, chapterIdx)] || "";
 }
@@ -1168,8 +1471,10 @@ function advancePomodoroPhase() {
   t.remainingMs = 0;
 }
 
-function exportProgress() {
-  const payload = {
+// The single source of truth for "everything that counts as your progress" —
+// used by EXPORT, and by cloud sync so the cloud copy is exactly this shape.
+function buildBackupPayload() {
+  return {
     _format: "bt-ledger-backup-v3",
     exportedAt: new Date().toISOString(),
     progress: state.progress,
@@ -1183,6 +1488,10 @@ function exportProgress() {
     countdowns: state.countdowns,
     notes: state.notes,
   };
+}
+
+function exportProgress() {
+  const payload = buildBackupPayload();
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1203,6 +1512,26 @@ function importProgressFromFile(file) {
   reader.onload = () => {
     try {
       const parsed = JSON.parse(reader.result);
+      const isBundled = applyBackupPayload(parsed);
+      render();
+      alert(isBundled
+        ? "Progress, calendar and stats all imported successfully."
+        : "Progress imported. (This was an older backup, so it didn't include calendar or stats data.)");
+    } catch (err) {
+      alert("Could not read that file — make sure it's a backup exported from this tool.");
+    }
+  };
+  reader.readAsText(file);
+}
+
+// Applies a backup-shaped object (from a file import OR a cloud pull) onto
+// state, persisting each slice locally. Does NOT call render() or show any
+// alert — callers do that, since a cloud pull wants to stay quiet while a
+// file import wants to confirm. Internally suppresses cloud sync so data
+// that just came down from the cloud isn't immediately pushed straight back.
+function applyBackupPayload(parsed) {
+  suppressCloudSync = true;
+  try {
       // Backward compatible: older exports were just the progress object itself
       // (top-level keys = subject names). Newer exports wrap it as { progress, events, history }.
       const isBundled = parsed && typeof parsed === "object" && parsed.progress && typeof parsed.progress === "object";
@@ -1277,15 +1606,10 @@ function importProgressFromFile(file) {
       state.notes = cleanNotes;
       saveNotes();
 
-      render();
-      alert(isBundled
-        ? "Progress, calendar and stats all imported successfully."
-        : "Progress imported. (This was an older backup, so it didn't include calendar or stats data.)");
-    } catch (err) {
-      alert("Could not read that file — make sure it's a backup exported from this tool.");
-    }
-  };
-  reader.readAsText(file);
+      return isBundled;
+  } finally {
+    suppressCloudSync = false;
+  }
 }
 
 /* ---------------- calendar events persistence ---------------- */
@@ -1305,6 +1629,7 @@ function loadEvents() {
 
 function saveEvents() {
   safeLocalStorageSet(EVENTS_KEY, JSON.stringify(state.events));
+  scheduleCloudSync();
 }
 
 /* ---------------- revision mode persistence ---------------- */
@@ -1324,6 +1649,7 @@ function loadRevisionDays() {
 }
 function saveRevisionDays() {
   safeLocalStorageSet(REVISION_KEY, JSON.stringify(state.revisionDays));
+  scheduleCloudSync();
 }
 function loadRevisionModeOn() {
   try {
@@ -1334,6 +1660,7 @@ function loadRevisionModeOn() {
 }
 function saveRevisionModeOn() {
   safeLocalStorageSet(REVISION_MODE_KEY, state.revisionModeOn ? "1" : "0");
+  scheduleCloudSync();
 }
 function isRevisionDay(key) { return !!state.revisionDays[key]; }
 // One-off toggle for a single date (used by the calendar day-detail view,
@@ -1382,6 +1709,7 @@ function loadFreezeDays() {
 }
 function saveFreezeDays() {
   safeLocalStorageSet(FREEZE_KEY, JSON.stringify(state.freezeDays));
+  scheduleCloudSync();
 }
 function loadFreezeDeclined() {
   try {
@@ -1396,6 +1724,7 @@ function loadFreezeDeclined() {
 }
 function saveFreezeDeclined() {
   safeLocalStorageSet(FREEZE_DECLINED_KEY, JSON.stringify(state.freezeDeclined));
+  scheduleCloudSync();
 }
 function isFreezeDeclined(key) { return !!state.freezeDeclined[key]; }
 function isFreezeDay(key) { return state.freezeDays.includes(key); }
@@ -1469,6 +1798,7 @@ function loadHistory() {
 
 function saveHistory() {
   safeLocalStorageSet(HISTORY_KEY, JSON.stringify(state.history));
+  scheduleCloudSync();
 }
 
 function logHistory(subject, delta) {
@@ -3428,7 +3758,58 @@ document.addEventListener("keydown", (e) => {
   if (e.key.toLowerCase() === "f") { e.preventDefault(); openPalette(); }
 });
 
-render();
+/* ---------------- boot sequence ---------------- */
+async function initApp() {
+  const passphrase = getStoredPassphrase();
+
+  if (passphrase) {
+    // Returning, logged-in device: pull the cloud copy before the first
+    // render so the screen shows up-to-date data, not a stale local cache.
+    setCloudStatus("syncing");
+    try {
+      const res = await fetch(`${WORKER_URL}/api/sync/pull`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passphrase }),
+      });
+      if (res.status === 404) {
+        // Passphrase no longer exists server-side (e.g. KV was cleared) — fall
+        // back to local-only rather than getting stuck.
+        clearStoredPassphrase();
+        setCloudStatus("offline");
+      } else if (res.ok) {
+        const { data } = await res.json();
+        // An empty {} means this device just hasn't pushed anything up yet
+        // (e.g. a fresh account, or the very first load on a new browser) —
+        // applying it would wipe out real local data, so instead push local
+        // state up to seed the cloud copy.
+        if (data && Object.keys(data).length > 0) {
+          applyBackupPayload(data);
+        } else {
+          scheduleCloudSync();
+        }
+        setCloudStatus("synced");
+      } else {
+        setCloudStatus("error");
+      }
+    } catch (err) {
+      console.warn("Initial cloud pull failed \u2014 continuing with local data.", err);
+      setCloudStatus("error");
+    }
+    render();
+  } else if (localStorage.getItem(CLOUD_DECLINED_KEY) === "1") {
+    // User previously chose local-only — don't nag them again.
+    setCloudStatus("offline");
+    render();
+  } else {
+    // First-ever visit (or first since declining was reset): render the app
+    // underneath so it's not blank, then show the login gate on top.
+    render();
+    showLoginGate();
+  }
+}
+
+initApp();
 </script>
 </body>
 </html>
