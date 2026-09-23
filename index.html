@@ -2368,7 +2368,10 @@ function toggleEvent(dateKeyStr, id) {
   const list = state.events[dateKeyStr];
   if (!list) return;
   const item = list.find((e) => e.id === id);
-  if (item) item.done = !item.done;
+  if (item) {
+    item.done = !item.done;
+    if (item.done) launchConfetti();
+  }
   saveEvents();
   render();
 }
@@ -2384,9 +2387,14 @@ function deleteEvent(dateKeyStr, id) {
 function setExercise(subject, moduleIndex, chapterIdx, key, value, total) {
   const clamped = Math.max(0, Math.min(total, isNaN(value) ? 0 : value));
   const prev = state.progress[subject][moduleIndex][chapterIdx][key];
+  const overallBefore = overallAgg(state.progress);
+  const pctBefore = pctFloor(overallBefore.done, overallBefore.total);
   state.progress[subject][moduleIndex][chapterIdx][key] = clamped;
   logHistory(subject, clamped - prev);
   saveProgress();
+  const overallAfter = overallAgg(state.progress);
+  const pctAfter = pctFloor(overallAfter.done, overallAfter.total);
+  if (pctAfter > pctBefore) launchConfetti({ big: true });
   render();
 }
 /* ---------------- rendering (retro skin) ---------------- */
@@ -3539,18 +3547,26 @@ function handleTitleClick() {
 }
 
 const CONFETTI_COLORS = ["#4CDE6E", "#FF5A36", "#38B6FF", "#F2C94C", "#F2F2F2"];
-function launchConfetti() {
-  const count = 90;
+function launchConfetti(opts = {}) {
+  const big = !!opts.big;
+  // "big" bursts (new whole-number percentage milestones) get more pieces,
+  // larger pieces, and a longer fall/lifetime than the standard burst.
+  const count = big ? 220 : 90;
+  const sizeMin = big ? 9 : 6;
+  const sizeRange = big ? 11 : 6;
+  const durationMin = big ? 3.4 : 2.2;
+  const durationRange = big ? 2.8 : 1.6;
+  const delayRange = big ? 0.6 : 0.35;
   for (let i = 0; i < count; i++) {
     const piece = document.createElement("div");
     piece.className = "confetti-piece";
-    const size = 6 + Math.random() * 6;
+    const size = sizeMin + Math.random() * sizeRange;
     const color = CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)];
     const left = Math.random() * 100;
-    const duration = 2.2 + Math.random() * 1.6;
-    const delay = Math.random() * 0.35;
+    const duration = durationMin + Math.random() * durationRange;
+    const delay = Math.random() * delayRange;
     const endRotate = 360 + Math.random() * 720;
-    const drift = (Math.random() - 0.5) * 160;
+    const drift = (Math.random() - 0.5) * (big ? 240 : 160);
     piece.style.left = `${left}vw`;
     piece.style.width = `${size}px`;
     piece.style.height = `${size * 1.6}px`;
