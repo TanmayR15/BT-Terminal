@@ -3289,6 +3289,7 @@ function renderDashboard() {
     const ex1Total = chConfig.ex1;
     const ex2Done = chProgress.ex2;
     const ex2Total = chConfig.ex2;
+    const pyqDone = state.pyq[pinned.subject][pinned.moduleIndex][pinned.chapterIdx];
     const quickAdd = (exKey, exDone, exTotal, n) => {
       state.focusUndoStack.push({ subject: pinned.subject, moduleIndex: pinned.moduleIndex, chapterIdx: pinned.chapterIdx, exKey, prevValue: exDone, total: exTotal });
       if (state.focusUndoStack.length > 50) state.focusUndoStack.shift(); // cap so it can't grow unbounded in one session
@@ -3303,12 +3304,20 @@ function renderDashboard() {
       if (stack.length === 0) return;
       const u = stack.pop();
       if (u.subject !== pinned.subject || u.moduleIndex !== pinned.moduleIndex || u.chapterIdx !== pinned.chapterIdx) return;
-      setExercise(u.subject, u.moduleIndex, u.chapterIdx, u.exKey, u.prevValue, u.total);
+      if (u.exKey === "pyq") setPyq(u.subject, u.moduleIndex, u.chapterIdx, u.prevValue);
+      else setExercise(u.subject, u.moduleIndex, u.chapterIdx, u.exKey, u.prevValue, u.total);
+    };
+    // PYQs have no fixed total, so they get their own quick-add (no clamping to a max).
+    const quickAddPyq = () => {
+      state.focusUndoStack.push({ subject: pinned.subject, moduleIndex: pinned.moduleIndex, chapterIdx: pinned.chapterIdx, exKey: "pyq", prevValue: pyqDone, total: null });
+      if (state.focusUndoStack.length > 50) state.focusUndoStack.shift();
+      setPyq(pinned.subject, pinned.moduleIndex, pinned.chapterIdx, pyqDone + 1);
     };
 
     const quickRow = [
       el("button", { class: "focus-goto", text: "+1 EX-1", onclick: () => quickAdd("ex1", ex1Done, ex1Total, 1) }),
       el("button", { class: "focus-goto", text: "+1 EX-2", onclick: () => quickAdd("ex2", ex2Done, ex2Total, 1) }),
+      el("button", { class: "focus-goto", text: "+1 PYQ", onclick: quickAddPyq }),
       el("button", { class: "focus-goto", text: "\u21B6 UNDO", onclick: undoFocus }),
       el("button", { class: "focus-goto", text: "OPEN CHAPTER \u2192", onclick: () => goChapter(pinned.subject, pinned.moduleIndex, pinned.chapterIdx) }),
       el("button", { class: "focus-unpin", text: "unpin", onclick: () => togglePin(pinned.subject, pinned.moduleIndex, pinned.chapterIdx) }),
@@ -3321,7 +3330,7 @@ function renderDashboard() {
           el("span", { class: "focus-name pixel", text: chConfig.name.toUpperCase() }),
           statLine(agg.done, agg.total),
         ]),
-        el("div", { class: "focus-sub", text: `${pinned.subject.toUpperCase()} \u00b7 MODULE ${pinned.moduleIndex} \u00b7 EX-1: ${ex1Done}/${ex1Total} \u00b7 EX-2: ${ex2Done}/${ex2Total}` }),
+        el("div", { class: "focus-sub", text: `${pinned.subject.toUpperCase()} \u00b7 MODULE ${pinned.moduleIndex} \u00b7 EX-1: ${ex1Done}/${ex1Total} \u00b7 EX-2: ${ex2Done}/${ex2Total} \u00b7 PYQ: ${pyqDone}` }),
         pixelBar(agg.done, agg.total, t.accent),
         el("div", { class: "focus-quick-row" }, quickRow),
       ]),
